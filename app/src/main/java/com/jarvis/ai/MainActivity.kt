@@ -1,17 +1,25 @@
 package com.jarvis.ai
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.jarvis.ai.api.OpenAIService
 import com.jarvis.ai.automation.ActionExecutor
 import com.jarvis.ai.automation.JarvisAccessibilityService
@@ -173,8 +182,98 @@ fun ChatScreen(onSendMessage: (String, (String, String) -> Unit) -> Unit) {
     var inputText by remember { mutableStateOf("") }
     val messages = remember { mutableStateListOf<Pair<String, String>>() }
     var isLoading by remember { mutableStateOf(false) }
+    var isListening by remember { mutableStateOf(false) }
+    var speechStatusText by remember { mutableStateOf("") }
 
     val isAccessibilityActive = JarvisAccessibilityService.isRunning()
+
+    // Permission launcher for Microphone
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            Toast.makeText(context, "Microphone permission is required for voice commands!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Speech Recognizer setup
+    val speechRecognizer = remember {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        } else null
+    }
+
+    fun startListening() {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+
+        if (speechRecognizer == null) {
+            Toast.makeText(context, "Speech recognition is not available on this device", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        }
+
+        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                isListening = true
+                speechStatusText = "Listening... Speak now!"
+            }
+
+            override fun onBeginningOfSpeech() {
+                speechStatusText = "Recording audio..."
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isListening = false
+                speechStatusText = "Processing speech..."
+            }
+
+            override fun onError(error: Int) {
+                isListening = false
+                speechStatusText = "Voice error ($error). Try again."
+            }
+
+            override fun onResults(results: Bundle?) {
+                isListening = false
+                speechStatusText = ""
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val recognizedText = matches[0]
+                    messages.add(Pair("User", recognizedText))
+                    isLoading = true
+
+                    onSendMessage(recognizedText) { rawResult, spoken ->
+                        isLoading = false
+                        messages.add(Pair("Jarvis", spoken))
+                    }
+                }
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+
+        speechRecognizer.startListening(intent)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            speechRecognizer?.destroy()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -245,25 +344,54 @@ fun ChatScreen(onSendMessage: (String, (String, String) -> Unit) -> Unit) {
             }
         }
 
+        if (speechStatusText.isNotEmpty()) {
+            Text(
+                text = speechStatusText,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            )
+        }
+
         if (isLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Input Box
+        // Input Box with Voice Mic Button
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Voice Mic Button
+            IconButton(
+                onClick = { startListening() },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = if (isListening) Color.Red else MaterialTheme.colorScheme.primary,
+                        shape = CircleShape
+                    )
+            ) {
+                Text(if (isListening) "🎙️..." else "🎙️", fontSize = 20.sp)
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             OutlinedTextField(
                 value = inputText,
                 onValueChange = { inputText = it },
-                placeholder = { Text("Ask Jarvis to do anything...") },
+                placeholder = { Text("Talk or type to Jarvis...") },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
+
             Spacer(modifier = Modifier.width(8.dp))
+
             Button(
                 onClick = {
                     if (inputText.isNotBlank()) {
