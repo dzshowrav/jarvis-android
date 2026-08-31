@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Jarvis AI</string>
+    <string name="accessibility_service_label">Jarvis AI Action Engine</string>
+    <string name="accessibility_service_description">Allows Jarvis AI to navigate screen elements, perform taps, type text, and execute voice actions on your behalf.</string>
+</resources>
