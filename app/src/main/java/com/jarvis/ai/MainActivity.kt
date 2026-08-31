@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.lifecycleScope
 import com.jarvis.ai.api.OpenAIService
 import com.jarvis.ai.automation.ActionExecutor
 import com.jarvis.ai.automation.JarvisAccessibilityService
@@ -30,6 +31,7 @@ import com.jarvis.ai.data.ChatCompletionRequest
 import com.jarvis.ai.data.ChatMessage
 import com.jarvis.ai.data.ConfigManager
 import com.jarvis.ai.service.JarvisForegroundService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,10 +78,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun sendChatMessage(userText: String, onResult: (String, String) -> Unit) {
-        val scope = (this as ComponentActivity)
-        val coroutineScope = androidx.lifecycle.lifecycleScope
-
-        coroutineScope.launch(Dispatchers.IO) {
+        CoroutineScope(Dispatchers.IO).launch {
             val messages = listOf(
                 ChatMessage("system", configManager.systemPrompt),
                 ChatMessage("user", userText)

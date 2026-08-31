@@ -71,7 +71,7 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         if (focusedNode != null) {
             val arguments = Bundle()
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_ARGUMENT, textToType)
+            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, textToType)
             return focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
         }
         return false
