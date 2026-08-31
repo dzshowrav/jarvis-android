@@ -23,7 +23,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
 import com.jarvis.ai.api.OpenAIService
 import com.jarvis.ai.automation.ActionExecutor
 import com.jarvis.ai.automation.JarvisAccessibilityService
@@ -59,6 +58,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             JarvisTheme {
                 MainAppScreen(
                     configManager = configManager,
+                    openAIService = openAIService,
                     onSendMessage = { userText, onResult ->
                         sendChatMessage(userText, onResult)
                     }
@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 ChatMessage("user", userText)
             )
             val request = ChatCompletionRequest(
-                model = configManager.modelName,
+                model = configManager.modelName.trim(),
                 messages = messages
             )
 
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     onResult(aiReply, spokenResponse)
                 }.onFailure { error ->
                     val errorMsg = "Error: ${error.message}"
-                    speakOut("Sorry sir, encountered an error.")
+                    speakOut("Encountered an API error.")
                     onResult(errorMsg, errorMsg)
                 }
             }
@@ -134,6 +134,7 @@ fun JarvisTheme(content: @Composable () -> Unit) {
 @Composable
 fun MainAppScreen(
     configManager: ConfigManager,
+    openAIService: OpenAIService,
     onSendMessage: (String, (String, String) -> Unit) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -160,7 +161,7 @@ fun MainAppScreen(
             if (selectedTab == 0) {
                 ChatScreen(onSendMessage = onSendMessage)
             } else {
-                SettingsScreen(configManager = configManager)
+                SettingsScreen(configManager = configManager, openAIService = openAIService)
             }
         }
     }
@@ -286,13 +287,16 @@ fun ChatScreen(onSendMessage: (String, (String, String) -> Unit) -> Unit) {
 }
 
 @Composable
-fun SettingsScreen(configManager: ConfigManager) {
+fun SettingsScreen(configManager: ConfigManager, openAIService: OpenAIService) {
     val context = LocalContext.current
 
     var baseUrl by remember { mutableStateOf(configManager.baseUrl) }
     var apiKey by remember { mutableStateOf(configManager.apiKey) }
     var modelName by remember { mutableStateOf(configManager.modelName) }
     var systemPrompt by remember { mutableStateOf(configManager.systemPrompt) }
+
+    var testResult by remember { mutableStateOf("") }
+    var isTesting by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -305,61 +309,147 @@ fun SettingsScreen(configManager: ConfigManager) {
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
+
+        // 1-Click Quick Presets
+        Text("Quick Provider Presets:", fontSize = 12.sp, color = Color.Gray)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            FilterChip(
+                selected = false,
+                onClick = {
+                    baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/"
+                    modelName = "gemini-1.5-flash"
+                },
+                label = { Text("Gemini") }
+            )
+            FilterChip(
+                selected = false,
+                onClick = {
+                    baseUrl = "https://api.groq.com/openai/v1/"
+                    modelName = "llama-3.1-70b-versatile"
+                },
+                label = { Text("Groq") }
+            )
+            FilterChip(
+                selected = false,
+                onClick = {
+                    baseUrl = "https://api.openai.com/v1/"
+                    modelName = "gpt-4o"
+                },
+                label = { Text("OpenAI") }
+            )
+            FilterChip(
+                selected = false,
+                onClick = {
+                    baseUrl = "https://openrouter.ai/api/v1/"
+                    modelName = "meta-llama/llama-3.1-70b-instruct"
+                },
+                label = { Text("OpenRouter") }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
             value = baseUrl,
             onValueChange = { baseUrl = it },
             label = { Text("OpenAI Compatible Base URL") },
-            placeholder = { Text("https://api.openai.com/v1/ or custom endpoint") },
+            placeholder = { Text("https://generativelanguage.googleapis.com/v1beta/openai/") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it },
             label = { Text("API Key") },
-            placeholder = { Text("sk-...") },
+            placeholder = { Text("Enter API Key") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
             value = modelName,
             onValueChange = { modelName = it },
             label = { Text("Model Name") },
-            placeholder = { Text("gpt-4o, llama3-70b-8192, deepseek-chat") },
+            placeholder = { Text("gemini-1.5-flash, gpt-4o, llama-3.1-70b-versatile") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        OutlinedTextField(
-            value = systemPrompt,
-            onValueChange = { systemPrompt = it },
-            label = { Text("System Prompt & Action Schema") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        if (testResult.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (testResult.startsWith("✓")) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(
+                    text = testResult,
+                    color = Color.White,
+                    modifier = Modifier.padding(8.dp),
+                    fontSize = 12.sp
+                )
+            }
+        }
 
-        Button(
-            onClick = {
-                configManager.baseUrl = baseUrl
-                configManager.apiKey = apiKey
-                configManager.modelName = modelName
-                configManager.systemPrompt = systemPrompt
-                Toast.makeText(context, "Settings saved successfully!", Toast.LENGTH_SHORT).show()
-            },
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Save Configuration")
+            Button(
+                onClick = {
+                    // Save first
+                    configManager.baseUrl = baseUrl.trim()
+                    configManager.apiKey = apiKey.trim()
+                    configManager.modelName = modelName.trim()
+                    configManager.systemPrompt = systemPrompt
+
+                    isTesting = true
+                    testResult = "Testing connection..."
+
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = openAIService.testConnection()
+                        withContext(Dispatchers.Main) {
+                            isTesting = false
+                            result.onSuccess { reply ->
+                                testResult = "✓ Connected successfully! AI: \"$reply\""
+                            }.onFailure { err ->
+                                testResult = "❌ Connection Failed:\n${err.message}"
+                            }
+                        }
+                    }
+                },
+                enabled = !isTesting,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (isTesting) "Testing..." else "Test Connection")
+            }
+
+            Button(
+                onClick = {
+                    configManager.baseUrl = baseUrl.trim()
+                    configManager.apiKey = apiKey.trim()
+                    configManager.modelName = modelName.trim()
+                    configManager.systemPrompt = systemPrompt
+                    Toast.makeText(context, "Settings saved!", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Save Settings")
+            }
         }
     }
 }
